@@ -1,0 +1,595 @@
+{
+  "id": "XdEMm8wVxjuuEoTG",
+  "name": "LinkedIn Content Factory — 01 Scrape & Generate",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "af5b8e55-4c95-4f23-acfb-c8e92718319e",
+      "name": "Cron 8h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        2000,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const profiles = [\n  \"https://www.linkedin.com/company/n8n-io/posts/\",\n  \"https://www.linkedin.com/company/make-com/posts/\",\n  \"https://www.linkedin.com/in/tibo-louis-viger/posts/\",\n  \"https://www.linkedin.com/in/guillaume-moubeche/posts/\",\n  \"https://www.linkedin.com/in/arnaud-belinga/posts/\"\n];\nreturn [{ json: { actorInput: { startUrls: profiles.map(url => ({ url })), maxPostsPerProfile: 10, proxyConfiguration: { useApifyProxy: true } } } }];"
+      },
+      "id": "26a3c8f6-3fce-4360-be53-d9c8f64f0758",
+      "name": "Build Apify Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2208,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.apify.com/v2/acts/apify~linkedin-posts-scraper/run-sync-get-dataset-items?token={{ $vars.APIFY_TOKEN }}&timeout=120&memory=1024",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.actorInput) }}",
+        "options": {
+          "timeout": 150000
+        }
+      },
+      "id": "1ac58b33-c5f6-48fe-9bc7-5b04d337b6c8",
+      "name": "Apify: Scrape LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst posts = Array.isArray(raw) ? raw : (raw.items || raw.data || []);\n\nconst filtered = posts\n  .filter(post => {\n    const likes    = post.likes || post.numLikes || post.reactionCount || 0;\n    const comments = post.comments || post.numComments || post.commentCount || 0;\n    return (likes + comments) >= 100;\n  })\n  .slice(0, 10)\n  .map(post => ({ json: {\n    hasData: true,\n    url:      post.url || post.postUrl || '',\n    author:   post.authorName || post.author?.name || 'Inconnu',\n    content:  (post.text || post.content || '').substring(0, 2000),\n    likes:    post.likes || post.numLikes || post.reactionCount || 0,\n    comments: post.comments || post.numComments || post.commentCount || 0,\n    shares:   post.shares || post.numShares || 0,\n    postedAt: post.postedAt || new Date().toISOString()\n  }}));\n\nif (filtered.length === 0) return [{ json: { hasData: false } }];\nreturn filtered;"
+      },
+      "id": "5fc53bcb-8d4f-4294-9981-ce3a17071230",
+      "name": "Filter & Parse Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2608,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-has-data",
+              "leftValue": "={{ $json.hasData }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b21c0745-b39d-422b-9a8e-3c9e7624e079",
+      "name": "Has Posts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "3d9eaa51-1915-49d4-bcf4-3fc07af6ab16",
+      "name": "Loop: Analyze Posts",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2208,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"mistral\",\n  \"prompt\": \"Tu es expert en copywriting LinkedIn. Analyse ce post viral.\\n\\nPOST:\\n---\\n{{ $json.content }}\\n---\\nAuteur: {{ $json.author }} | Likes: {{ $json.likes }} | Commentaires: {{ $json.comments }}\\n\\nRéponds UNIQUEMENT en JSON valide :\\n{\\n  \\\"hook\\\": \\\"première accroche (max 2 lignes)\\\",\\n  \\\"rehook\\\": \\\"phrase de maintien d'attention\\\",\\n  \\\"payoff\\\": \\\"valeur principale délivrée\\\",\\n  \\\"cta\\\": \\\"appel à l'action\\\",\\n  \\\"hook_type\\\": \\\"confession|stats|question|liste|histoire|defi\\\",\\n  \\\"format\\\": \\\"Court|Moyen|Long\\\",\\n  \\\"theme\\\": \\\"automation|no-code|freelance|productivite|ia|outil\\\",\\n  \\\"score_viral\\\": 7\\n}\",\n  \"stream\": false,\n  \"temperature\": 0.2\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "b6710ffe-9829-4baf-8a33-770f11b6c16c",
+      "name": "Ollama: Analyze Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ollamaText = $input.first().json.response || '';\nlet analysis = {};\ntry {\n  const m = ollamaText.match(/\\{[\\s\\S]*\\}/);\n  if (m) analysis = JSON.parse(m[0]);\n} catch(e) { analysis = { hook: 'N/A', rehook: 'N/A', payoff: 'N/A', cta: 'N/A', hook_type: 'autre', format: 'Moyen', theme: 'automation', score_viral: 5 }; }\n\nconst postData = $('Loop: Analyze Posts').first().json;\n\nreturn [{ json: {\n  id: `viral_${Date.now()}_${Math.random().toString(36).substr(2,6)}`,\n  url:       postData.url || '',\n  author:    postData.author || '',\n  content:   postData.content || '',\n  likes:     postData.likes || 0,\n  comments:  postData.comments || 0,\n  shares:    postData.shares || 0,\n  postedAt:  postData.postedAt || '',\n  hook:      analysis.hook || '',\n  rehook:    analysis.rehook || '',\n  payoff:    analysis.payoff || '',\n  cta:       analysis.cta || '',\n  hookType:  analysis.hook_type || 'autre',\n  format:    analysis.format || 'Moyen',\n  theme:     analysis.theme || 'automation',\n  scoreViral: Number(analysis.score_viral) || 5,\n  scrapedAt: new Date().toISOString()\n} }];"
+      },
+      "id": "8d206eb4-9406-4ceb-a0a4-b5410c99aa80",
+      "name": "Parse Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2608,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "ViralPosts",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{ $json.id }}",
+            "URL": "={{ $json.url }}",
+            "Author": "={{ $json.author }}",
+            "Content": "={{ $json.content.substring(0, 1000) }}",
+            "Likes": "={{ $json.likes }}",
+            "Comments": "={{ $json.comments }}",
+            "Shares": "={{ $json.shares }}",
+            "Hook": "={{ $json.hook }}",
+            "Rehook": "={{ $json.rehook }}",
+            "Payoff": "={{ $json.payoff }}",
+            "CTA": "={{ $json.cta }}",
+            "HookType": "={{ $json.hookType }}",
+            "Format": "={{ $json.format }}",
+            "Theme": "={{ $json.theme }}",
+            "ScoreViral": "={{ $json.scoreViral }}",
+            "ScrapedAt": "={{ $json.scrapedAt }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "b9526bd2-8641-40f4-a6f1-9688ef16693c",
+      "name": "Sheets: Save Viral Post",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        2800,
+        16
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NznwYiyQzqjAKGIB",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Remplacer YOUR_GOOGLE_SHEET_ID par l'ID du Google Sheet (dans l'URL)"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "ViralPosts",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "5b6286c8-be88-4812-a4b0-009e923eb0d1",
+      "name": "Sheets: Get Viral Posts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        2208,
+        256
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NznwYiyQzqjAKGIB",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const posts = $input.all();\n\nconst topPosts = posts\n  .sort((a, b) => (Number(b.json.ScoreViral) || 0) - (Number(a.json.ScoreViral) || 0))\n  .slice(0, 8)\n  .map(p => ({\n    hook:     p.json.Hook || '',\n    hookType: p.json.HookType || 'autre',\n    payoff:   p.json.Payoff || '',\n    cta:      p.json.CTA || '',\n    theme:    p.json.Theme || 'automation'\n  }));\n\nconst hookCounts = {};\ntopPosts.forEach(p => { hookCounts[p.hookType] = (hookCounts[p.hookType] || 0) + 1; });\nconst bestHook = Object.entries(hookCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'confession';\n\nconst examples = topPosts.slice(0, 4)\n  .map((p, i) => `Exemple ${i+1} [${p.hookType}/${p.theme}]:\\nHook: ${p.hook}\\nValeur: ${p.payoff}\\nCTA: ${p.cta}`)\n  .join('\\n\\n');\n\nconst prompt = `Tu es un copywriter expert LinkedIn spécialisé en automatisation no-code.\\nTon persona : Freelance français, expert n8n/Make.com, tu aides les PME à automatiser sans coder.\\nTon ton : direct, authentique, pas corporate. Tu parles de vraies expériences client.\\n\\nPATTERNS VIRAUX DÉTECTÉS (dominant: \"${bestHook}\"):\\n${examples}\\n\\nCRÉE 3 POSTS LINKEDIN distincts, EN FRANÇAIS :\\n1. POST \"confession\" : erreur ou apprentissage lié à l'automatisation\\n2. POST \"stats\" : chiffre surprenant + solution n8n\\n3. POST \"question\" : douleur commune en PME + réponse automatisée\\n\\nCHAQUE POST doit :\\n- Commencer par un hook puissant (max 2 lignes)\\n- Utiliser Hook → Rehook → Valeur → CTA\\n- Mentionner un résultat concret\\n- Terminer par un CTA fort\\n- Faire 800-1200 caractères\\n- Être authentique, pas marketo-bullshit\\n\\nRéponds UNIQUEMENT avec ce JSON valide :\\n{\\n  \"posts\": [\\n    { \"type\": \"confession\", \"content\": \"[texte complet]\", \"hook\": \"[première ligne]\", \"image_prompt\": \"[prompt anglais Flux/Midjourney]\" },\\n    { \"type\": \"stats\", \"content\": \"[texte complet]\", \"hook\": \"[première ligne]\", \"image_prompt\": \"[prompt anglais]\" },\\n    { \"type\": \"question\", \"content\": \"[texte complet]\", \"hook\": \"[première ligne]\", \"image_prompt\": \"[prompt anglais]\" }\\n  ]\\n}`;\n\nreturn [{ json: { prompt, bestHook, postCount: topPosts.length } }];"
+      },
+      "id": "6c133b09-4e1b-4c40-9cc0-efeaf53b85bc",
+      "name": "Build Generation Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"mistral\",\n  \"prompt\": {{ JSON.stringify($json.prompt) }},\n  \"stream\": false,\n  \"temperature\": 0.85,\n  \"num_ctx\": 8192,\n  \"num_predict\": 3000\n}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "2f883fd6-f659-4eea-8c09-77fac774bbe1",
+      "name": "Ollama: Generate 3 Posts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2608,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ollamaText = $input.first().json.response || '';\nlet parsed = { posts: [] };\ntry {\n  const m = ollamaText.match(/\\{[\\s\\S]*\"posts\"[\\s\\S]*\\}/);\n  if (m) parsed = JSON.parse(m[0]);\n} catch(e) {\n  parsed = { posts: [{ type: 'draft', content: ollamaText.substring(0, 1200), hook: 'Draft auto-généré', image_prompt: 'Clean automation workflow diagram, modern, professional' }] };\n}\n\nif (!parsed.posts?.length) return [{ json: { error: 'No posts', raw: ollamaText.substring(0, 300) } }];\n\nreturn parsed.posts.map((post, idx) => ({\n  json: {\n    id:          `post_${Date.now()}_${idx}_${Math.random().toString(36).substr(2,5)}`,\n    type:        post.type || 'draft',\n    content:     post.content || '',\n    hook:        post.hook || '',\n    imagePrompt: post.image_prompt || 'Professional automation workspace, clean, modern',\n    index:       idx + 1,\n    totalPosts:  parsed.posts.length,\n    createdAt:   new Date().toISOString()\n  }\n}));"
+      },
+      "id": "7c4aa4a4-74c5-4ca8-aaf5-750bbeb8b8a4",
+      "name": "Parse 3 Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "eff885a9-7467-4fe8-bd34-c7e602ec3d55",
+      "name": "Loop: Save Drafts",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2208,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "GeneratedPosts",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{ $json.id }}",
+            "Content": "={{ $json.content }}",
+            "Hook": "={{ $json.hook }}",
+            "Type": "={{ $json.type }}",
+            "ImagePrompt": "={{ $json.imagePrompt }}",
+            "Status": "pending",
+            "CreatedAt": "={{ $json.createdAt }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "f282acee-c29d-4431-8188-029556bd3d23",
+      "name": "Sheets: Save Draft",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        2400,
+        496
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NznwYiyQzqjAKGIB",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chat_id\": \"{{ $vars.TELEGRAM_CHAT_ID }}\",\n  \"text\": \"📝 *Draft LinkedIn {{ $('Loop: Save Drafts').item.json.index }}/{{ $('Loop: Save Drafts').item.json.totalPosts }}* — Type: `{{ $('Loop: Save Drafts').item.json.type }}`\\n\\n*Hook :* {{ $('Loop: Save Drafts').item.json.hook }}\\n\\n{{ $('Loop: Save Drafts').item.json.content.substring(0, 400) }}...\",\n  \"parse_mode\": \"Markdown\",\n  \"reply_markup\": {\n    \"inline_keyboard\": [[\n      {\"text\": \"✅ Approuver & Poster\", \"callback_data\": \"approve:{{ $('Loop: Save Drafts').item.json.id }}\"},\n      {\"text\": \"❌ Rejeter\", \"callback_data\": \"reject:{{ $('Loop: Save Drafts').item.json.id }}\"}\n    ]]\n  }\n}",
+        "options": {}
+      },
+      "id": "d3a27a7a-4a14-4a28-8d41-441b9a3aec13",
+      "name": "Telegram: Send Draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2608,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"chat_id\": \"{{ $vars.TELEGRAM_CHAT_ID }}\", \"text\": \"✅ *3 drafts générés et envoyés !*\\nApprouve dans Telegram → post LinkedIn automatique.\", \"parse_mode\": \"Markdown\"}",
+        "options": {}
+      },
+      "id": "bab988fe-5d56-4d53-95f0-dbac89f565c3",
+      "name": "Telegram: Summary Done",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2800,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"chat_id\": \"{{ $vars.TELEGRAM_CHAT_ID }}\", \"text\": \"⚠️ *Scraper* : Aucun post viral trouvé (engagement >= 100). Vérifier Apify.\", \"parse_mode\": \"Markdown\"}",
+        "options": {}
+      },
+      "id": "cffcf662-e238-4a26-b7e5-2b7ff3231fcc",
+      "name": "Telegram: No Posts Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3008,
+        -96
+      ]
+    }
+  ],
+  "connections": {
+    "Cron 8h": {
+      "main": [
+        [
+          {
+            "node": "Build Apify Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Apify Payload": {
+      "main": [
+        [
+          {
+            "node": "Apify: Scrape LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify: Scrape LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Filter & Parse Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter & Parse Posts": {
+      "main": [
+        [
+          {
+            "node": "Has Posts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Posts?": {
+      "main": [
+        [
+          {
+            "node": "Loop: Analyze Posts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: No Posts Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop: Analyze Posts": {
+      "main": [
+        [
+          {
+            "node": "Ollama: Analyze Post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheets: Get Viral Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama: Analyze Post": {
+      "main": [
+        [
+          {
+            "node": "Parse Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Analysis": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Save Viral Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Save Viral Post": {
+      "main": [
+        [
+          {
+            "node": "Loop: Analyze Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Get Viral Posts": {
+      "main": [
+        [
+          {
+            "node": "Build Generation Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Generation Prompt": {
+      "main": [
+        [
+          {
+            "node": "Ollama: Generate 3 Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama: Generate 3 Posts": {
+      "main": [
+        [
+          {
+            "node": "Parse 3 Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse 3 Posts": {
+      "main": [
+        [
+          {
+            "node": "Loop: Save Drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop: Save Drafts": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Save Draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: Summary Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Save Draft": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Send Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram: Send Draft": {
+      "main": [
+        [
+          {
+            "node": "Loop: Save Drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "meta": {},
+  "createdAt": "2026-03-14 19:46:32.615",
+  "updatedAt": "2026-03-14 19:53:10.567",
+  "description": ""
+}
