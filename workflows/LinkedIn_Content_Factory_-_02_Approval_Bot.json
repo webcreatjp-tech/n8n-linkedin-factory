@@ -1,0 +1,382 @@
+{
+  "id": "hEd6L2yK7EuFsxYM",
+  "name": "LinkedIn Content Factory — 02 Approval Bot",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "id": "762cff1f-ee1a-4aef-b670-943e2e3c0e65",
+      "name": "Telegram: Callback Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        576,
+        656
+      ],
+      "webhookId": "linkedin-approval-bot",
+      "credentials": {
+        "telegramApi": {
+          "id": "5IqF446S7446SmUc",
+          "name": "agent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const callbackQuery = $input.first().json.callback_query || {};\nconst callbackData  = callbackQuery.data || '';\nconst [action, postId] = callbackData.split(':');\n\nif (!action || !postId) throw new Error(`Format invalide: ${callbackData}`);\n\nreturn [{ json: {\n  action,\n  postId,\n  isApprove:       action === 'approve',\n  callbackQueryId: callbackQuery.id,\n  chatId:          callbackQuery.message?.chat?.id || callbackQuery.from?.id,\n  fromName:        callbackQuery.from?.first_name || 'User'\n} }];"
+      },
+      "id": "f3168ce9-9339-4472-bf2c-0465a6e52cd4",
+      "name": "Parse Callback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-approve",
+              "leftValue": "={{ $json.isApprove }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f1d51a00-1197-4755-86bf-4811362675a0",
+      "name": "Is Approve?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        976,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "GeneratedPosts",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "a938785b-e797-4593-a392-76b68b7e99f3",
+      "name": "Sheets: Read All Drafts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        1168,
+        528
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NznwYiyQzqjAKGIB",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filtrer la ligne dont l'ID correspond au postId du callback\nconst postId = $('Parse Callback').first().json.postId;\nconst match  = $input.all().find(row => row.json.ID === postId);\n\nif (!match) throw new Error(`Post introuvable dans Sheets: ${postId}`);\n\nreturn [{ json: {\n  id:      match.json.ID,\n  content: match.json.Content || '',\n  hook:    match.json.Hook || '',\n  type:    match.json.Type || ''\n} }];"
+      },
+      "id": "54f59a5a-9330-43e6-856e-91c1dd70c0a2",
+      "name": "Find Draft by ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1376,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "person": "={{ $vars.LINKEDIN_PERSON_URN }}",
+        "text": "={{ $json.content }}",
+        "additionalFields": {}
+      },
+      "id": "c48a7c27-952d-48b5-9640-5ddc04868430",
+      "name": "LinkedIn: Post",
+      "type": "n8n-nodes-base.linkedIn",
+      "typeVersion": 1,
+      "position": [
+        1568,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "GeneratedPosts",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{ $('Parse Callback').first().json.postId }}",
+            "Status": "posted",
+            "PostedAt": "={{ $now.toISO() }}",
+            "LinkedInPostId": "={{ $json.id || $json.activity || '' }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "2ff1f545-91bd-4f48-971b-5da7bb94320e",
+      "name": "Sheets: Mark as Posted",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        1776,
+        528
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NznwYiyQzqjAKGIB",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/answerCallbackQuery",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"callback_query_id\": \"{{ $('Parse Callback').first().json.callbackQueryId }}\", \"text\": \"✅ Posté sur LinkedIn !\", \"show_alert\": false}",
+        "options": {}
+      },
+      "id": "899edb26-0f0f-4451-a45a-fc0815bab7a4",
+      "name": "Telegram: Answer OK",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1968,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"chat_id\": \"{{ $('Parse Callback').first().json.chatId }}\", \"text\": \"🚀 *Post LinkedIn publié !*\\nLe workflow Feedback vérifiera les stats dans 48h.\", \"parse_mode\": \"Markdown\"}",
+        "options": {}
+      },
+      "id": "5076e96d-65f1-4f2e-b86d-abf3ba27c33e",
+      "name": "Telegram: Confirm Posted",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2176,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "GeneratedPosts",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{ $json.postId }}",
+            "Status": "rejected",
+            "RejectedAt": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "abef54b3-efaf-451c-a6e7-c7680a837099",
+      "name": "Sheets: Mark as Rejected",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        1168,
+        800
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NznwYiyQzqjAKGIB",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/answerCallbackQuery",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"callback_query_id\": \"{{ $('Parse Callback').first().json.callbackQueryId }}\", \"text\": \"❌ Post rejeté.\", \"show_alert\": false}",
+        "options": {}
+      },
+      "id": "35177cca-338d-4f3c-9faa-181455bffbd7",
+      "name": "Telegram: Answer Rejected",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1376,
+        800
+      ]
+    }
+  ],
+  "connections": {
+    "Telegram: Callback Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Callback": {
+      "main": [
+        [
+          {
+            "node": "Is Approve?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Approve?": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Read All Drafts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheets: Mark as Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Read All Drafts": {
+      "main": [
+        [
+          {
+            "node": "Find Draft by ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Draft by ID": {
+      "main": [
+        [
+          {
+            "node": "LinkedIn: Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LinkedIn: Post": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Mark as Posted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Mark as Posted": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Answer OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram: Answer OK": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Confirm Posted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Mark as Rejected": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Answer Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "createdAt": "2026-03-14 19:47:00.644",
+  "updatedAt": "2026-03-14 19:53:38.506",
+  "description": ""
+}
