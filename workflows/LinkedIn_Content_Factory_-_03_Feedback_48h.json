@@ -1,0 +1,403 @@
+{
+  "id": "wcT6kWFXmHKaZMeb",
+  "name": "LinkedIn Content Factory — 03 Feedback 48h",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "ff5e328d-6fc3-4c13-a904-950cb08092a1",
+      "name": "Cron Toutes 2h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        1392,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "GeneratedPosts",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "63db34f9-239e-4a98-af9d-799251149108",
+      "name": "Sheets: Read All Posts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        1600,
+        704
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NznwYiyQzqjAKGIB",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filtrer les posts publiés depuis 48h sans feedback\nconst cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);\n\nconst pending = $input.all().filter(row => {\n  const r = row.json;\n  return r.Status === 'posted'\n    && (!r.FeedbackCollected || r.FeedbackCollected === 'FALSE')\n    && r.PostedAt\n    && new Date(r.PostedAt) < cutoff;\n});\n\nif (pending.length === 0) return [{ json: { hasPending: false } }];\n\nreturn pending.map(row => ({ json: { ...row.json, hasPending: true } }));"
+      },
+      "id": "f184d1a4-0878-4f56-94ed-cd2f932c6b47",
+      "name": "Filter Pending Feedback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-pending",
+              "leftValue": "={{ $json.hasPending }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f1643f8e-862f-402e-8513-579bb65450cd",
+      "name": "Has Pending?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "1410c675-f8c6-47fc-a5a0-8ecc55eab9f9",
+      "name": "Loop: Fetch Stats",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1600,
+        928
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.linkedin.com/v2/socialMetadata?ids=List({{ $json.LinkedInPostId }})",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "linkedInOAuth2Api",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "b0987700-0e56-404b-8af5-7ffd907a759d",
+      "name": "LinkedIn: Get Stats",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1792,
+        928
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const linkedinData = $input.first().json;\nconst postData     = $('Loop: Fetch Stats').first().json;\n\nlet likes = 0, comments = 0, shares = 0, clicks = 0, impressions = 0;\ntry {\n  const results = linkedinData.results || {};\n  const key     = Object.keys(results)[0];\n  if (key) {\n    const meta  = results[key];\n    const stats = meta.totalSocialActivityCounts || {};\n    likes       = stats.numLikes    || 0;\n    comments    = stats.numComments || 0;\n    shares      = stats.numShares   || 0;\n    clicks      = stats.numClicks   || 0;\n    impressions = stats.numImpressions || 0;\n  }\n} catch(e) { console.log('Stats parse error:', e.message); }\n\nconst totalEngagement  = likes + comments + shares + clicks;\nconst engagementRate   = impressions > 0 ? parseFloat(((totalEngagement / impressions) * 100).toFixed(2)) : 0;\n\nreturn [{ json: {\n  id:              postData.ID,\n  impressions,\n  likes,\n  comments,\n  shares,\n  clicks,\n  totalEngagement,\n  engagementRate,\n  isTopPerformer:  totalEngagement > 50\n} }];"
+      },
+      "id": "c73129dc-3804-43d7-8b93-0093d8fb68b9",
+      "name": "Parse Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        928
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "GeneratedPosts",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{ $json.id }}",
+            "Impressions": "={{ $json.impressions }}",
+            "StatLikes": "={{ $json.likes }}",
+            "StatComments": "={{ $json.comments }}",
+            "StatShares": "={{ $json.shares }}",
+            "StatClicks": "={{ $json.clicks }}",
+            "TotalEngagement": "={{ $json.totalEngagement }}",
+            "EngagementRate": "={{ $json.engagementRate }}",
+            "IsTopPerformer": "={{ $json.isTopPerformer }}",
+            "FeedbackCollected": "TRUE",
+            "FeedbackAt": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "1a6debfe-fcec-476b-a834-124467349169",
+      "name": "Sheets: Update Stats",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        2192,
+        928
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NznwYiyQzqjAKGIB",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all();"
+      },
+      "id": "8e1b5440-bf62-4033-9d64-b6f2e1123d69",
+      "name": "Loop Back",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        928
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "GeneratedPosts",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "418e13d3-d308-4315-a7fd-f1b1b34aacb2",
+      "name": "Sheets: Read All for Report",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        1600,
+        1168
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "NznwYiyQzqjAKGIB",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const posts = $input.all()\n  .filter(p => p.json.Status === 'posted' && p.json.FeedbackCollected === 'TRUE')\n  .sort((a, b) => (Number(b.json.TotalEngagement) || 0) - (Number(a.json.TotalEngagement) || 0));\n\nif (posts.length === 0) return [{ json: { report: 'Pas encore de données feedback.' } }];\n\nconst byType = {};\nposts.forEach(p => {\n  const t = p.json.Type || 'unknown';\n  if (!byType[t]) byType[t] = { count: 0, totalEng: 0 };\n  byType[t].count++;\n  byType[t].totalEng += Number(p.json.TotalEngagement) || 0;\n});\nObject.keys(byType).forEach(t => { byType[t].avgEng = Math.round(byType[t].totalEng / byType[t].count); });\n\nconst topType = Object.entries(byType).sort((a, b) => b[1].avgEng - a[1].avgEng)[0];\nconst top3 = posts.slice(0, 3).map(p =>\n  `• [${p.json.Type}] ${(p.json.Hook || p.json.Content || '').substring(0, 55)}... → ${p.json.TotalEngagement || 0} eng.`\n).join('\\n');\n\nconst statsLines = Object.entries(byType)\n  .map(([t, d]) => `• ${t}: ${d.count} posts, avg ${d.avgEng} eng.`)\n  .join('\\n');\n\nconst report = `📊 *Rapport Feedback LinkedIn*\\n\\n*Pattern gagnant :* ${topType?.[0] || 'N/A'} (avg ${topType?.[1]?.avgEng || 0} eng.)\\n\\n*Top 3 posts :*\\n${top3}\\n\\n*Stats par type :*\\n${statsLines}\\n\\n💡 Prioriser le type \\'${topType?.[0] || 'confession'}\\' pour demain.`;\n\nreturn [{ json: { report } }];"
+      },
+      "id": "58a99acf-dd36-4b30-a3b8-a891d011b1fa",
+      "name": "Analyze Patterns",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"chat_id\": \"{{ $vars.TELEGRAM_CHAT_ID }}\", \"text\": {{ JSON.stringify($json.report) }}, \"parse_mode\": \"Markdown\"}",
+        "options": {}
+      },
+      "id": "8e5a580e-3ffa-4719-a074-46ea3804f741",
+      "name": "Telegram: Send Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2000,
+        1168
+      ]
+    }
+  ],
+  "connections": {
+    "Cron Toutes 2h": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Read All Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Read All Posts": {
+      "main": [
+        [
+          {
+            "node": "Filter Pending Feedback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Pending Feedback": {
+      "main": [
+        [
+          {
+            "node": "Has Pending?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Pending?": {
+      "main": [
+        [
+          {
+            "node": "Loop: Fetch Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop: Fetch Stats": {
+      "main": [
+        [
+          {
+            "node": "LinkedIn: Get Stats",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheets: Read All for Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LinkedIn: Get Stats": {
+      "main": [
+        [
+          {
+            "node": "Parse Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Stats": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Update Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Update Stats": {
+      "main": [
+        [
+          {
+            "node": "Loop Back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Back": {
+      "main": [
+        [
+          {
+            "node": "Loop: Fetch Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Read All for Report": {
+      "main": [
+        [
+          {
+            "node": "Analyze Patterns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Patterns": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Send Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "meta": {},
+  "createdAt": "2026-03-14 19:47:09.871",
+  "updatedAt": "2026-03-14 19:53:23.992",
+  "description": ""
+}
